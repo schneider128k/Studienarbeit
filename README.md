@@ -32,6 +32,8 @@ function via the **stationary phase approximation**.
 
 For the full mathematical description, see [docs/method.pdf](docs/method.pdf).
 
+For the original 1997 Studienarbeit, see [docs/Studienarbeit.pdf](docs/Studienarbeit.pdf).
+
 ## Installation
 
 **Prerequisites:** Python 3.8 or later.
