@@ -23,7 +23,8 @@ from typing import Tuple
 def recover_phase_polynomial(
     mesh_in_x: np.ndarray, mesh_in_y: np.ndarray,
     mesh_out_x: np.ndarray, mesh_out_y: np.ndarray,
-    D: int
+    D: int,
+    grid_size: int = None
 ) -> np.ndarray:
     """
     Recover the phase polynomial coefficients from mesh correspondences.
@@ -31,20 +32,27 @@ def recover_phase_polynomial(
     The mesh nodes define the geometric transformation:
       in(i,j) = (x_ij, y_ij)  →  out(i,j) = (φx_ij, φy_ij)
 
-    The stationary phase condition ∇φ(x_ij, y_ij) = c · (φx_ij, φy_ij)
-    gives a linear system for the polynomial coefficients a_{kl}.
+    The stationary phase condition is:
+        ∇φ(x_ij, y_ij) = c · (φx_ij - 0.5, φy_ij - 0.5)
 
-    We absorb the constant c into the coefficients for simplicity.
+    where the output coordinates are centered (subtract 0.5) because
+    the FFT places DC at the center. The constant c = 2π·N_grid
+    converts from normalized coordinates to the phase scale required
+    by the discrete Fourier transform.
 
     Parameters
     ----------
     mesh_in_x, mesh_in_y : ndarray, shape (s, s)
-        Input mesh node coordinates.
+        Input mesh node coordinates in [0, 1].
     mesh_out_x, mesh_out_y : ndarray, shape (s, s)
-        Output mesh node coordinates.
+        Output mesh node coordinates in [0, 1].
     D : int
         Polynomial degree parameter. The polynomial has degree D-1,
         with D*(D+1)/2 coefficients.
+    grid_size : int, optional
+        Size of the FFT propagation grid. If provided, the output
+        coordinates are centered and scaled by 2π·grid_size.
+        If None, no scaling is applied (unit constant c=1).
 
     Returns
     -------
@@ -54,6 +62,15 @@ def recover_phase_polynomial(
     """
     s = mesh_in_x.shape[0]
     n_coeffs = D * (D + 1) // 2
+
+    # Center and scale output coordinates for FFT compatibility
+    if grid_size is not None:
+        c = 2 * np.pi * grid_size
+        target_x = c * (mesh_out_x - 0.5)
+        target_y = c * (mesh_out_y - 0.5)
+    else:
+        target_x = mesh_out_x.copy()
+        target_y = mesh_out_y.copy()
 
     # Build the matrix and RHS for the normal equations
     # From the Studienarbeit (Equations 11 and 12):
@@ -77,8 +94,8 @@ def recover_phase_polynomial(
                 for j in range(s):
                     xij = mesh_in_x[i, j]
                     yij = mesh_in_y[i, j]
-                    phix = mesh_out_x[i, j]
-                    phiy = mesh_out_y[i, j]
+                    phix = target_x[i, j]
+                    phiy = target_y[i, j]
 
                     if row_k > 0:
                         rhs += row_k * phix * _safe_pow(xij, row_k - 1) * _safe_pow(yij, row_l)

@@ -451,51 +451,172 @@ class RectMesh:
         for a signal with arbitrary intensity distribution.
 
         This is the generalization from Section 4.3 of the Studienarbeit.
-        The area conditions are weighted by the energy in each cell.
+
+        Strategy: Energy-weighted Laplace smoothing. Each interior node is
+        moved toward the energy-weighted centroid of its 4 direct neighbors.
+        The weight for each neighbor is the total energy in the cells that
+        would SHRINK if the node moves toward that neighbor. This naturally
+        clusters nodes in high-energy regions and spreads them in low-energy
+        regions.
+
+        Boundary nodes (non-corner) are moved along their edge to equalize
+        the energy in the two adjacent cells.
 
         Parameters
         ----------
         signal : ndarray, shape (size, size)
-            2D intensity distribution (squared amplitude).
+            2D amplitude distribution. Energy is computed as amplitude^2.
         n_iter : int
             Number of optimization iterations.
         alpha : float
-            Step size for node movement.
+            Step size for node movement (0 < alpha <= 1).
         """
         s = self.s
-        size = signal.shape[0]
 
         for iteration in range(n_iter):
+            # Compute energy in every cell ONCE per iteration
+            energies = self.cell_energies(signal)  # shape (s-1, s-1)
+
             x_new = self.x.copy()
             y_new = self.y.copy()
 
+            # --- Interior nodes: energy-weighted Laplace smoothing ---
             for i in range(1, s - 1):
                 for j in range(1, s - 1):
-                    xc, yc = self._ideal_position_energy_weighted(
-                        i, j, signal, size
-                    )
-                    if xc is not None and np.isfinite(xc) and np.isfinite(yc):
-                        dx = xc - self.x[i, j]
-                        dy = yc - self.y[i, j]
-                        max_step = 0.5 / s
-                        dx = np.clip(dx, -max_step, max_step)
-                        dy = np.clip(dy, -max_step, max_step)
-                        x_new[i, j] = self.x[i, j] + alpha * dx
-                        y_new[i, j] = self.y[i, j] + alpha * dy
+                    # The 4 cells surrounding node (i,j):
+                    #   cell (i-1, j)   = upper-left  (NW)
+                    #   cell (i,   j)   = upper-right (NE)
+                    #   cell (i-1, j-1) = lower-left  (SW)
+                    #   cell (i,   j-1) = lower-right (SE)
+                    e_nw = energies[i - 1, j] if (i > 0 and j < s - 1) else 0
+                    e_ne = energies[i, j] if (i < s - 1 and j < s - 1) else 0
+                    e_sw = energies[i - 1, j - 1] if (i > 0 and j > 0) else 0
+                    e_se = energies[i, j - 1] if (i < s - 1 and j > 0) else 0
 
-            # Boundary nodes on square edges
-            for i in range(1, s - 1):
-                for j_val in [0, s - 1]:
-                    self._optimize_boundary_energy(
-                        i, j_val, x_new, y_new, signal, size, alpha
-                    )
-                for i_val in [0, s - 1]:
-                    self._optimize_boundary_energy(
-                        i_val, i, x_new, y_new, signal, size, alpha
-                    )
+                    # Weight for each neighbor = energy of adjacent cells
+                    # Moving toward left neighbor shrinks NW and SW cells
+                    w_left = e_nw + e_sw
+                    w_right = e_ne + e_se
+                    w_up = e_nw + e_ne
+                    w_down = e_sw + e_se
+
+                    total_w = w_left + w_right + w_up + w_down
+                    if total_w < 1e-14:
+                        continue
+
+                    # Energy-weighted centroid of the 4 direct neighbors
+                    cx = (w_left * self.x[i - 1, j] +
+                          w_right * self.x[i + 1, j] +
+                          w_down * self.x[i, j - 1] +
+                          w_up * self.x[i, j + 1]) / total_w
+                    cy = (w_left * self.y[i - 1, j] +
+                          w_right * self.y[i + 1, j] +
+                          w_down * self.y[i, j - 1] +
+                          w_up * self.y[i, j + 1]) / total_w
+
+                    new_x = self.x[i, j] + alpha * (cx - self.x[i, j])
+                    new_y = self.y[i, j] + alpha * (cy - self.y[i, j])
+
+                    # Only accept if it doesn't tangle the mesh
+                    if self._move_is_valid(i, j, new_x, new_y, x_new, y_new):
+                        x_new[i, j] = new_x
+                        y_new[i, j] = new_y
+
+            # --- Boundary nodes: balance energy of 2 adjacent cells ---
+            self._optimize_boundary_energy_simple(
+                x_new, y_new, energies, alpha
+            )
 
             self.x = x_new
             self.y = y_new
+
+    def _move_is_valid(self, i, j, new_x, new_y, x_arr, y_arr):
+        """
+        Check that moving node (i,j) to (new_x, new_y) doesn't create
+        any negative-area (tangled) cells.
+        """
+        s = self.s
+        # Check each cell that shares node (i,j)
+        for di, dj in [(0, 0), (-1, 0), (0, -1), (-1, -1)]:
+            ci, cj = i + di, j + dj
+            if ci < 0 or ci >= s - 1 or cj < 0 or cj >= s - 1:
+                continue
+            # Get the 4 corners of cell (ci, cj), with the updated position
+            corners_i = [(ci, cj), (ci + 1, cj), (ci + 1, cj + 1), (ci, cj + 1)]
+            vx, vy = [], []
+            for ni, nj in corners_i:
+                if ni == i and nj == j:
+                    vx.append(new_x)
+                    vy.append(new_y)
+                else:
+                    vx.append(x_arr[ni, nj])
+                    vy.append(y_arr[ni, nj])
+            # Signed area (shoelace)
+            area = 0
+            for k in range(4):
+                area += vx[k] * vy[(k + 1) % 4] - vx[(k + 1) % 4] * vy[k]
+            if area <= 0:  # negative = tangled
+                return False
+        return True
+
+    def _optimize_boundary_energy_simple(self, x_new, y_new, energies, alpha):
+        """
+        Move boundary nodes along their edge to balance energy in adjacent cells.
+        """
+        s = self.s
+
+        # Bottom edge (j=0): cells at (i-1, 0) and (i, 0)
+        for i in range(1, s - 1):
+            e_left = energies[i - 1, 0]
+            e_right = energies[i, 0]
+            total = e_left + e_right
+            if total < 1e-14:
+                continue
+            # Target: fraction of energy to the left
+            frac = e_left / total
+            x_left = self.x[i - 1, 0]
+            x_right = self.x[i + 1, 0]
+            x_target = x_left + frac * (x_right - x_left)
+            x_new[i, 0] += alpha * (x_target - self.x[i, 0])
+
+        # Top edge (j=s-1)
+        for i in range(1, s - 1):
+            e_left = energies[i - 1, s - 2]
+            e_right = energies[i, s - 2]
+            total = e_left + e_right
+            if total < 1e-14:
+                continue
+            frac = e_left / total
+            x_left = self.x[i - 1, s - 1]
+            x_right = self.x[i + 1, s - 1]
+            x_target = x_left + frac * (x_right - x_left)
+            x_new[i, s - 1] += alpha * (x_target - self.x[i, s - 1])
+
+        # Left edge (i=0)
+        for j in range(1, s - 1):
+            e_below = energies[0, j - 1]
+            e_above = energies[0, j]
+            total = e_below + e_above
+            if total < 1e-14:
+                continue
+            frac = e_below / total
+            y_below = self.y[0, j - 1]
+            y_above = self.y[0, j + 1]
+            y_target = y_below + frac * (y_above - y_below)
+            y_new[0, j] += alpha * (y_target - self.y[0, j])
+
+        # Right edge (i=s-1)
+        for j in range(1, s - 1):
+            e_below = energies[s - 2, j - 1]
+            e_above = energies[s - 2, j]
+            total = e_below + e_above
+            if total < 1e-14:
+                continue
+            frac = e_below / total
+            y_below = self.y[s - 1, j - 1]
+            y_above = self.y[s - 1, j + 1]
+            y_target = y_below + frac * (y_above - y_below)
+            y_new[s - 1, j] += alpha * (y_target - self.y[s - 1, j])
 
     def _ideal_position_energy_weighted(self, i, j, signal, size):
         """

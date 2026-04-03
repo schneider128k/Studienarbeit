@@ -4,7 +4,8 @@ Demo: Diffractive beam shaping via the Finite Element Method.
 
 Reproduces the core pipeline from Wocjan, Studienarbeit, Univ. Karlsruhe, 1997.
 
-Gaussian -> Square flat-top, comparing FEM start vs random start for IFTA.
+Example: Gaussian beam -> Square flat-top beam
+Compares FEM starting phase vs random starting phase for IFTA.
 """
 
 import numpy as np
@@ -23,26 +24,20 @@ from diffractive_fem.ifta import ifta
 from diffractive_fem.visualization import plot_mesh, plot_area_histogram
 
 
-def make_gaussian(N, sigma=0.1):
+def make_gaussian(N, sigma=0.12):
+    """Gaussian beam amplitude centered in the grid."""
     x = np.linspace(-0.5, 0.5, N)
     xx, yy = np.meshgrid(x, x)
     return np.exp(-(xx**2 + yy**2) / (2 * sigma**2))
 
 
-def make_square(N, half_side=0.12):
+def make_square(N, half_side=0.1):
+    """Square flat-top amplitude."""
     x = np.linspace(-0.5, 0.5, N)
     xx, yy = np.meshgrid(x, x)
     amp = np.zeros((N, N))
     amp[(np.abs(xx) <= half_side) & (np.abs(yy) <= half_side)] = 1.0
     return amp
-
-
-def generate_energy_mesh(signal_lowres, s, n_iter=300, alpha=0.2):
-    """Generate energy-equalized mesh for a signal."""
-    mesh = RectMesh(s)
-    mesh.init_uniform_square()
-    mesh.optimize_equal_energy(signal_lowres, n_iter=n_iter, alpha=alpha)
-    return mesh
 
 
 def main():
@@ -51,31 +46,34 @@ def main():
     print("  Wocjan, Studienarbeit, Univ. Karlsruhe (TH), 1997")
     print("=" * 65)
 
-    N = 128;  s = 10;  D = 5;  sig_size = 48
+    N = 128;  s = 12;  D = 5;  sig_size = 64
     print(f"\nGrid: {N}x{N}, Mesh: {s}x{s}, Poly degree: {D-1}")
 
-    # Signals
-    input_amp = make_gaussian(N, sigma=0.12)
-    input_lo = make_gaussian(sig_size, sigma=0.12)
-    desired_amp = make_square(N, half_side=0.1)
-    desired_lo = make_square(sig_size, half_side=0.1)
+    # Signals (high-res for propagation, low-res for mesh energy)
+    input_amp = make_gaussian(N)
+    input_lo = make_gaussian(sig_size)
+    desired_amp = make_square(N)
+    desired_lo = make_square(sig_size)
     signal_window = desired_amp > 0.5
 
     # Step 1: Energy-equalized meshes
-    print("\n[1] Generating input mesh (energy-weighted)...")
-    mesh_in = generate_energy_mesh(input_lo, s)
+    print("\n[1] Input mesh (energy-weighted for Gaussian)...")
+    mesh_in = RectMesh(s)
+    mesh_in.init_uniform_square()
+    mesh_in.optimize_equal_energy(input_lo, n_iter=400, alpha=0.3)
     e_in = mesh_in.cell_energies(input_lo)
-    print(f"    Energy uniformity: sigma/mu = {np.std(e_in)/np.mean(e_in):.4f}")
+    print(f"    sigma/mu = {np.std(e_in)/np.mean(e_in):.4f}")
 
-    print("[1] Generating output mesh (energy-weighted)...")
-    mesh_out = generate_energy_mesh(desired_lo, s)
+    print("[1] Output mesh (energy-weighted for square)...")
+    mesh_out = RectMesh(s)
+    mesh_out.init_uniform_square()
+    mesh_out.optimize_equal_energy(desired_lo, n_iter=400, alpha=0.3)
     e_out = mesh_out.cell_energies(desired_lo)
-    print(f"    Energy uniformity: sigma/mu = {np.std(e_out)/np.mean(e_out):.4f}")
+    print(f"    sigma/mu = {np.std(e_out)/np.mean(e_out):.4f}")
 
     # Step 2: Phase recovery
-    print(f"\n[2] Phase recovery (degree {D-1} polynomial, {D*(D+1)//2} coefficients)...")
-    coeffs = recover_phase_polynomial(mesh_in.x, mesh_in.y, mesh_out.x, mesh_out.y, D)
-
+    print(f"\n[2] Phase recovery (degree {D-1} polynomial)...")
+    coeffs = recover_phase_polynomial(mesh_in.x, mesh_in.y, mesh_out.x, mesh_out.y, D, grid_size=N)
     t = np.linspace(0, 1, N)
     xx, yy = np.meshgrid(t, t)
     phase_fem = evaluate_phase(coeffs, D, xx, yy)
@@ -86,9 +84,9 @@ def main():
     output_fem = propagate(apply_dpe(field_in, phase_fem))
     snr_fem = compute_snr(desired_amp, output_fem, signal_window)
     eff_fem = compute_efficiency(field_in, output_fem, signal_window)
-    print(f"    FEM only:  SNR = {snr_fem:.2f} dB,  eta = {eff_fem*100:.1f}%")
+    print(f"    FEM:  SNR = {snr_fem:.2f} dB, eta = {eff_fem*100:.1f}%")
 
-    # Step 4: IFTA refinement
+    # Step 4: IFTA
     print("\n[4] IFTA refinement...")
     phase_opt, hist_fem = ifta(input_amp, desired_amp, phase_fem,
                                n_iter_efficiency=10, n_iter_snr=20,
@@ -118,22 +116,22 @@ def main():
     print(f"  {'Random + IFTA':<22} {snr_rand:>10.2f} {eff_rand*100:>10.1f}")
     print("=" * 55)
 
-    # Plots
+    # --- Figure ---
     print("\nGenerating figure...")
     fig, axes = plt.subplots(3, 4, figsize=(18, 13))
     fig.suptitle('Diffractive Beam Shaper via Finite Element Method\n'
-                 'Wocjan, Studienarbeit, Univ. Karlsruhe (TH), 1997',
+                 'Wocjan, Studienarbeit, Universität Karlsruhe (TH), 1997',
                  fontsize=13, fontweight='bold')
 
     axes[0,0].imshow(input_amp**2, cmap='hot', origin='lower')
-    axes[0,0].set_title('Input: Gaussian |f1|^2')
+    axes[0,0].set_title('Input: Gaussian |f₁|²')
     axes[0,1].imshow(desired_amp**2, cmap='hot', origin='lower')
-    axes[0,1].set_title('Desired: Square |f2|^2')
+    axes[0,1].set_title('Desired: Square |f₂|²')
     plot_mesh(mesh_in, ax=axes[0,2], title=f'Input mesh (s={s})')
     plot_mesh(mesh_out, ax=axes[0,3], title='Output mesh', color='firebrick')
 
     im = axes[1,0].imshow(np.mod(phase_fem, 2*np.pi), cmap='twilight', origin='lower')
-    axes[1,0].set_title('FEM phase mod 2pi')
+    axes[1,0].set_title('FEM phase mod 2π')
     plt.colorbar(im, ax=axes[1,0], shrink=0.8)
     axes[1,1].imshow(np.abs(output_fem)**2, cmap='inferno', origin='lower')
     axes[1,1].set_title(f'FEM output\nSNR={snr_fem:.1f} dB')
@@ -156,7 +154,7 @@ def main():
     effs_r = [h['efficiency']*100 for h in hist_rand]
     axes[2,1].plot(iters_f, effs_f, 'b-o', ms=3, label='FEM start')
     axes[2,1].plot(iters_r, effs_r, 'r-s', ms=3, label='Random start')
-    axes[2,1].set_xlabel('Iteration'); axes[2,1].set_ylabel('eta (%)')
+    axes[2,1].set_xlabel('Iteration'); axes[2,1].set_ylabel('η (%)')
     axes[2,1].set_title('Diffraction efficiency'); axes[2,1].legend(fontsize=9)
     axes[2,1].grid(True, alpha=0.3)
 
@@ -169,8 +167,8 @@ def main():
     plot_area_histogram(mesh_in, ax=axes[2,3], title='Input mesh cell areas')
 
     plt.tight_layout()
-    fig.savefig('fem_beam_shaping.png', dpi=150, bbox_inches='tight')
-    print("  Saved fem_beam_shaping.png")
+    fig.savefig('gaussian_to_square.png', dpi=150, bbox_inches='tight')
+    print("  Saved gaussian_to_square.png")
     print("\nDone!")
 
 

@@ -35,7 +35,7 @@ company logo for marking applications.
 
 The DPE is described by its **transmission function**:
 
-$$T_{\text{DPE}}(x,y) = \exp\bigl(i\,\phi(x,y)\bigr)$$
+$$T_{\text{DPE}}(x,y) = \exp\left(i\,\phi(x,y)\right)$$
 
 where $\phi(x,y)$ is the **phase function** we need to compute. The DPE only
 modifies the phase of the light (not its amplitude), so no energy is absorbed
@@ -45,7 +45,7 @@ In the optical setup, the input and output planes sit at the focal distance $f$
 from a Fourier-transforming lens. **Wave propagation** between these planes is
 described by the 2D Fourier transform (Fraunhofer approximation):
 
-$$f_2 = \mathcal{F}\bigl\{ T_{\text{DPE}} \cdot f_1 \bigr\}$$
+$$f_2 = \mathcal{F}\left\{ T_{\text{DPE}} \cdot f_1 \right\}$$
 
 where $f_1$ is the input wavefront and $f_2$ is the output. Since only the
 **intensity** $|f_2|^2$ matters (not its phase), there is a large design freedom
@@ -164,7 +164,7 @@ parameter-free, but it can be inaccurate for highly non-separable signals.
 ### Quality Metrics
 
 - **Signal-to-Noise Ratio**: measures how well the output matches the target
-  $$\text{SNR}_I(f_2, f) = \frac{\|f\|^2}{\bigl\| |f_2| - \alpha|f| \bigr\|^2}, \qquad \alpha = \frac{\langle |f|, |f_2| \rangle}{\|f\|^2}$$
+  $$\text{SNR}_I(f_2, f) = \frac{\|f\|^2}{\left\| |f_2| - \alpha|f| \right\|^2}, \qquad \alpha = \frac{\langle |f|, |f_2| \rangle}{\|f\|^2}$$
 
 - **Diffraction Efficiency**: fraction of input energy reaching the signal window
   $$\eta = \frac{\|f\|^2_{W_{\text{Signal}}}}{\|f_1\|^2_{W_{\text{DE}}}}$$
