@@ -23,7 +23,7 @@ This is a **Python re-implementation** of the methods described in:
 The original implementation was written in **C++ in 1997** and was integrated into
 **DigiOpt**, a diffractive optics design system developed at the IAKS under
 Prof. Thomas Beth. Neither the original code nor DigiOpt exist anymore.
-This Python version recreates the complete pipeline from scratch, almost 30 years later.
+This Python version recreates methods implemented for the Studienarbeit, almost 30 years later.
 
 The goal is to design a thin optical element — a **diffractive phase element (DPE)** —
 that reshapes a laser beam into a desired intensity pattern using **finite element meshes**
@@ -31,6 +31,13 @@ to compute the energy-redistributing geometric transformation, then recovering t
 function via the **stationary phase approximation**.
 
 For the full mathematical description, see [docs/method.pdf](docs/method.pdf).
+
+For the orginal Studienarbeit, see [docs/Studienarbeit.pdf](docs/Studienarbeit.pdf)
+
+![Circle to square](docs/circle_to_square.png)
+![Circle to triangle](docs/circle_to_triangle.png)
+![Gaussian to cross](docs/gaussian_to_cross.png)
+![Gaussian to square](docs/gaussian_to_square.png)
 
 ## Installation
 
@@ -90,11 +97,15 @@ diffractive_fem/
 │
 ├── examples/
 │   ├── circle_to_square.py         ← Gaussian → Square beam shaping
-│   └── gaussian_to_cross.py        ← Gaussian → Cross pattern
+│   ├── circle_to_triangle.py       ← Gaussian → Square beam shaping
+│   ├── gaussian_to_cross           ← Gaussian → Square beam shaping
+│   └── gaussian_to_square.py       ← Gaussian → Cross pattern
 │
 ├── docs/
+│   ├── *.png                       ← Generated outputs for the examples
 │   ├── method.tex                  ← Mathematical description (LaTeX source)
-│   └── method.pdf                  ← Mathematical description (compiled)
+│   ├── method.pdf                  ← Mathematical description (compiled)
+│   └── Studienarbeit.pdf           ← 1997 Studienarbeit (compiled)
 │
 └── studienarbeit/                  ← Original 1997 LaTeX source (modernized)
     ├── ausarb.tex                  ← Main document (German)
@@ -165,9 +176,9 @@ pdflatex ausarb.tex && pdflatex ausarb.tex
 
 ## License
 
-- **Python code** (`diffractive_fem/`, `examples/`):
+- **Python code**:
   [GNU General Public License v3.0](LICENSE_CODE)
-- **Studienarbeit** (`studienarbeit/`):
+- **Studienarbeit**:
   [Creative Commons Attribution 4.0 International](LICENSE_STUDIENARBEIT)
 
 ## Author
