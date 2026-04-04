@@ -34,9 +34,16 @@ For the full mathematical description, see [docs/method.pdf](docs/method.pdf).
 
 For the orginal Studienarbeit, see [docs/Studienarbeit.pdf](docs/Studienarbeit.pdf)
 
+**Circle to square**
 ![Circle to square](docs/circle_to_square.png)
+
+**Circle to triangle**
 ![Circle to triangle](docs/circle_to_triangle.png)
+
+**Gaussian to cross**
 ![Gaussian to cross](docs/gaussian_to_cross.png)
+
+**Gaussian to square**
 ![Gaussian to square](docs/gaussian_to_square.png)
 
 ## Installation
