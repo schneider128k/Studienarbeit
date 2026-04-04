@@ -230,8 +230,12 @@ class RectMesh:
                         max_step = 0.5 / s
                         dx = np.clip(dx, -max_step, max_step)
                         dy = np.clip(dy, -max_step, max_step)
-                        x_new[i, j] = self.x[i, j] + alpha * dx
-                        y_new[i, j] = self.y[i, j] + alpha * dy
+                        new_x = self.x[i, j] + alpha * dx
+                        new_y = self.y[i, j] + alpha * dy
+                        # Only accept if it doesn't tangle the mesh
+                        if self._move_is_valid(i, j, new_x, new_y, x_new, y_new):
+                            x_new[i, j] = new_x
+                            y_new[i, j] = new_y
 
             # Optionally optimize boundary nodes
             if move_boundary:

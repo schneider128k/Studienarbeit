@@ -5,5 +5,4 @@ __pycache__/
 dist/
 build/
 *.png
-!docs/*.png
 !studienarbeit/*.png

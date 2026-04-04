@@ -21,54 +21,121 @@
 
 \section{The Problem}
 
-Design a \textbf{diffractive phase element} (DPE) that transforms an input beam $f_1$ 
-into a desired output intensity pattern~$|f_2|^2$. The DPE is described by its transmission function
+Design a \textbf{diffractive phase element} (DPE) with transmission function
 \[
-  T_{\mathrm{DPE}}(x,y) = \exp\bigl(i\,\phi(x,y)\bigr),
+  T_{\mathrm{DPE}}(x,y) = \exp\bigl(i\,\phi(x,y)\bigr)
 \]
-where $\phi(x,y)$ is the phase function to be computed. 
+that transforms an input beam $f_1$ into a desired output intensity pattern~$|f_2|^2$.
 Since $|T_{\mathrm{DPE}}|=1$, no energy is absorbed.
-
-In the optical setup, the input and output planes are at focal distance~$f$ from a 
-Fourier-transforming lens. Wave propagation is described by the 2D Fourier transform:
+Wave propagation between the input and output planes (at focal distance~$f$ from a lens) 
+is described by the 2D Fourier transform:
 \[
   f_2 = \mathcal{F}\bigl\{T_{\mathrm{DPE}} \cdot f_1\bigr\}.
 \]
-Since only the \textbf{intensity} $|f_2|^2$ matters (not its phase), 
+Since only the intensity $|f_2|^2$ matters (not its phase), 
 there is a large design freedom that the algorithms below exploit.
 
-\section{The Method}
+\section{The Geometric Transformation Approach}
 
-\subsection{Step 1: Mesh Generation}
+The central idea is to find a \textbf{geometric transformation}~$T$ 
+that maps each point $(x,y)$ in the input plane~$E$ to a point 
+$T(x,y) = \bigl(T_x(x,y),\, T_y(x,y)\bigr)$ in the output plane~$A$, 
+such that $T$ redistributes the intensity $|f_1|$ into $|f_2|$.
 
-Lay topologically equivalent meshes over the input plane~$E$ and output plane~$A$. 
-For \textbf{rectangular topology}, nodes are indexed by $(i,j)$ with $i,j\in\{0,\ldots,s{-}1\}$, 
-forming quadrilateral cells. Interior nodes have 4 direct neighbors and 8 surrounding nodes.
-
-Interior node positions are initialized using \textbf{4-point interpolation} (Atkin, 1994):
+Once such a transformation is found, the \textbf{method of stationary phase} 
+determines the phase function:
 \[
-  P_0 = \sum_{l=1}^{4} g_l\, P_l,
+  \nabla\phi(x,y) = \frac{2\pi}{\lambda f}\, T(x,y),
 \]
-where the weights depend on the Euclidean distances in index space:
+where $\lambda$ is the wavelength and $f$ is the focal length.
+
+Since the phase of $f_1$ can be encoded in the DPE, we may assume without loss 
+of generality that $f_1$ has constant phase. For $f_2$, only the intensity is 
+prescribed (phase freedom).
+
+\subsection{Analytical Solutions}
+
+An analytical solution for the geometric transformation $T$ exists in two cases:
+\begin{enumerate}
+  \item \textbf{Separable to separable}: If $f_1(x,y)=g_1(x)\,h_1(y)$ and 
+    $f_2(x,y)=g_2(x)\,h_2(y)$, then $T$ decomposes into two independent 1D problems.
+    Each 1D transformation is found by \textbf{CDF matching}: 
+    $T_x$ satisfies $\int_0^x |g_1(\xi)|^2\,d\xi = \int_0^{T_x(x)} |g_2(\xi)|^2\,d\xi$,
+    and similarly for $T_y$.
+  \item \textbf{Isotropic to isotropic}: If both $f_1$ and $f_2$ depend only on 
+    the radial distance $r = \sqrt{x^2+y^2}$, the problem reduces to a single 1D 
+    radial CDF-matching problem.
+\end{enumerate}
+
+For signals that do not fall into these classes, no analytical solution is available.
+
+\subsection{The SepOp Baseline}
+
+The \textbf{Separabilisierungsoperator} (SepOp) maps any signal to a nearby separable signal:
+\[
+  \mathrm{SepOp}\colon f(x,y) \;\mapsto\; 
+  \underbrace{\left(\int f(\xi,y)\,d\xi\right)}_{p(y)} \cdot 
+  \underbrace{\left(\int f(x,\xi)\,d\xi\right)}_{q(x)}.
+\]
+In the discrete case: $q(x) = \sum_y f(x,y)$ and $p(y) = \sum_x f(x,y)$, 
+giving $s(x,y) = q(x)\cdot p(y)$. After applying SepOp to both $f_1$ and $f_2$,
+the separable analytical method can be used. This provides a fast, parameter-free
+IFTA starting point, but can be inaccurate for highly non-separable signals.
+
+\subsection{The Finite Element Method}
+
+The FEM approach works for \emph{arbitrary} input and output signals, including 
+non-separable and non-isotropic ones. The idea:
+\begin{enumerate}
+  \item Lay \textbf{topologically equivalent meshes} over planes $E$ and~$A$.
+  \item \textbf{Optimize node positions} so corresponding cells contain equal energy.
+  \item The node correspondences define a \textbf{discrete transformation}~$T$.
+  \item \textbf{Recover $\phi$} from $T$ via polynomial least squares on $\nabla\phi$.
+\end{enumerate}
+
+\section{Rectangular Topology --- Constant Intensity (Section 4.1)}
+
+Consider transforming a \textbf{circle with constant intensity} into a 
+\textbf{square with constant intensity}. Since the intensity is constant, 
+equal area implies equal energy.
+
+\subsection{Mesh Generation}
+
+Nodes are indexed by $(i,j)$ with $i,j \in \{0,\ldots,s{-}1\}$, 
+forming a rectangular grid topology. The algorithm has three steps:
+
+\textbf{Step 1 --- Boundary nodes.} 
+For the output (square), nodes are placed uniformly on the square boundary.
+For the input (circle), nodes are placed uniformly (by arc length) on the circle.
+
+\textbf{Step 2 --- 4-point interpolation.}
+Each interior node $P_0 = (i_0, j_0)$ is interpolated from its 4 associated 
+boundary nodes $P_1,\ldots,P_4$ (the boundary intersections along the $i$- and $j$-directions):
+\[
+  P_0 = \sum_{l=1}^{4} g_l\, P_l.
+\]
+The weights depend on the Euclidean distances $d_l = [(i_0{-}i_l)^2 + (j_0{-}j_l)^2]^{1/2}$ 
+in index space:
 \begin{align*}
   g_1 &= \frac{d_2\, d_3\, d_4}{(d_1+d_2)\,(d_1 d_2 + d_3 d_4)}, &
   g_2 &= \frac{d_1\, d_3\, d_4}{(d_1+d_2)\,(d_1 d_2 + d_3 d_4)}, \\[4pt]
   g_3 &= \frac{d_1\, d_2\, d_4}{(d_3+d_4)\,(d_3 d_4 + d_1 d_2)}, &
-  g_4 &= \frac{d_1\, d_2\, d_3}{(d_3+d_4)\,(d_3 d_4 + d_1 d_2)},
+  g_4 &= \frac{d_1\, d_2\, d_3}{(d_3+d_4)\,(d_3 d_4 + d_1 d_2)}.
 \end{align*}
-with $d_k = \bigl[(i_0-i_k)^2 + (j_0-j_k)^2\bigr]^{1/2}$.
 
-For \textbf{triangular topology}, nodes are indexed by $(i,j)$ with $j=0,\ldots,s{-}1$ 
-and $i=0,\ldots,j$, using a 6-point interpolation formula with analogous weights.
+\textbf{Step 3 --- Laplace smoothing.}
+Interior nodes are smoothed using the discrete Laplace operator: 
+each node moves toward the centroid of its 4 direct neighbors:
+\[
+  P_0' = P_0 + \alpha\,(C - P_0), \qquad
+  C = \tfrac{1}{4}(P_1 + P_2 + P_3 + P_4).
+\]
 
-\subsection{Step 2: Mesh Optimization}
+\subsection{Equal-Area Optimization (8-Point Algorithm)}
 
-\subsubsection{Equal-Area Optimization (8-Point Algorithm)}
-
-For constant-intensity signals, equal area implies equal energy. 
 For an interior node~$P_0$ surrounded by 8 neighbors $P_1,\ldots,P_8$ 
-(numbered counterclockwise from top: $P_1$=top, $P_2$=top-right, \ldots, $P_8$=top-left), 
-the \textbf{ideal position} $C(x_c,y_c)$ that equalizes the 4 surrounding cell areas satisfies:
+(numbered counterclockwise: $P_1$=top, $P_2$=top-right, \ldots, $P_8$=top-left), 
+the \textbf{ideal position} $C(x_c,y_c)$ equalizing the 4 surrounding cell areas satisfies:
 \[
   x_c = \frac{bf - de}{bc - ad}, \qquad y_c = \frac{af - ce}{bc - ad},
 \]
@@ -79,96 +146,98 @@ where
   e &= x_1(y_2{-}y_8) + x_5(y_4{-}y_6) + y_1(x_8{-}x_2) + y_5(x_6{-}x_4), \\
   f &= x_3(y_2{-}y_4) + x_7(y_8{-}y_6) + y_3(x_4{-}x_2) + y_7(x_6{-}x_8).
 \end{align*}
-The node is moved iteratively: $P_0' = P_0 + \alpha\,(C - P_0)$ with step size $0 < \alpha \le 1$.
+The node is moved iteratively: $P_0' = P_0 + \alpha\,(C - P_0)$.
+A validity check rejects moves that would create negative-area (tangled) cells.
 
-\subsubsection{Energy-Weighted Optimization (General Signals)}
+Boundary nodes on the circle are moved along the circle arc to equalize their 
+two adjacent cells, using the 5-point boundary algorithm.
 
-For signals with non-uniform intensity, the Python implementation uses 
-\textbf{energy-weighted Laplace smoothing}. Each interior node is moved toward the 
-energy-weighted centroid of its 4 direct neighbors:
+\section{Triangular Topology --- Constant Intensity (Section 4.2)}
+
+Consider transforming a \textbf{circle with constant intensity} into an 
+\textbf{equilateral triangle with constant intensity}. 
+The triangular topology is more natural for this geometry.
+
+\subsection{Mesh Generation}
+
+Nodes are indexed by $(i,j)$ with $j = 0,\ldots,s{-}1$ and $i = 0,\ldots,j$. 
+The total number of nodes is $s(s{+}1)/2$. Cells are triangles.
+
+Interior nodes are initialized using the \textbf{6-point interpolation} formula:
 \[
-  C = \frac{w_{\mathrm{left}}\, P_{\mathrm{left}} + w_{\mathrm{right}}\, P_{\mathrm{right}} 
-  + w_{\mathrm{up}}\, P_{\mathrm{up}} + w_{\mathrm{down}}\, P_{\mathrm{down}}}
-  {w_{\mathrm{left}} + w_{\mathrm{right}} + w_{\mathrm{up}} + w_{\mathrm{down}}},
+  P_0 = \sum_{l=1}^{6} g_l\, P_l,
 \]
-where $w_{\mathrm{left}}$ is the total energy in the two cells to the left of the node, etc.
-This pulls nodes toward high-energy regions, creating smaller cells there and larger cells 
-in low-energy regions. A validity check rejects any move that would create a negative-area 
-(tangled) cell.
+where $P_1,\ldots,P_6$ are the 6 associated boundary nodes along the 3 triangle 
+directions, and the weights have the same distance-based structure as the 4-point 
+formula but with 3 pairs of directions.
 
-The energy in each quadrilateral cell is computed by scanning pixels inside the polygon 
-using a ray-casting point-in-polygon test.
+\subsection{Equal-Area Optimization (9-Point Algorithm)}
 
-\subsection{Step 3: Phase Recovery (Polynomial Least Squares)}
+The 8-point algorithm from Section~4.1 is not adapted to triangular topology.
+Instead, the \textbf{9-point algorithm} is used. An interior node $P_0$ has 
+9 surrounding neighbors $P_1,\ldots,P_9$, forming triangular cells $A,B,\ldots,I$.
+The equal-area conditions are:
+\begin{align}
+  D + H + I &= B + E + F, \\
+  G + H + I &= A + C + B.
+\end{align}
+These give two linear equations for the ideal position $(x_c, y_c)$:
+\[
+  x_c = \frac{ed - fb}{ad - cb}, \qquad y_c = \frac{af - ce}{ad - cb},
+\]
+with coefficients $a,\ldots,f$ that are linear combinations of the 9 neighbor 
+coordinates (see the Studienarbeit for full formulas).
 
-The mesh correspondences $\mathrm{in}(i,j)=(x_{ij},y_{ij})$ and 
-$\mathrm{out}(i,j)=(\phi_x^{ij},\phi_y^{ij})$ define a discrete geometric transformation. 
-By the \textbf{stationary phase condition}:
+\section{General Signals --- Arbitrary Intensity (Section 4.3)}
+
+For signals with \textbf{non-uniform intensity}, we use rectangular topology 
+but weight the optimization by energy content. 
+
+The mesh starts as a uniform square grid on $[0,1]^2$. In each iteration:
+\begin{enumerate}
+  \item Compute the energy in each cell (by scanning pixels inside the polygon 
+    using a ray-casting point-in-polygon test).
+  \item Move each interior node toward the \textbf{energy-weighted centroid} 
+    of its 4 direct neighbors:
+    \[
+      C = \frac{w_L\, P_L + w_R\, P_R + w_U\, P_U + w_D\, P_D}
+               {w_L + w_R + w_U + w_D},
+    \]
+    where $w_L$ is the total energy in the two cells to the left of the node, etc.
+  \item A validity check rejects moves that would tangle the mesh.
+  \item Boundary nodes are moved along their edge to equalize adjacent cells.
+\end{enumerate}
+This naturally clusters nodes in high-energy regions (small cells) and spreads 
+them in low-energy regions (large cells).
+
+\section{Phase Recovery (Section 4.4)}
+
+Given optimized mesh correspondences $\mathrm{in}(i,j)=(x_{ij},y_{ij})$ and 
+$\mathrm{out}(i,j)=(\phi_x^{ij},\phi_y^{ij})$, we recover the phase function.
+
+The stationary phase condition is:
 \[
   \nabla\phi(x_{ij},y_{ij}) = c \cdot 
   \begin{pmatrix} \phi_x^{ij} - \tfrac{1}{2} \\ \phi_y^{ij} - \tfrac{1}{2} \end{pmatrix},
   \qquad c = 2\pi N,
 \]
-where $N$ is the FFT grid size and the subtraction of $\tfrac{1}{2}$ centers the output coordinates 
-(matching the \texttt{fftshift} convention).
-
-We approximate $\phi$ as a bivariate polynomial of degree $D{-}1$:
+where $N$ is the FFT grid size. We approximate $\phi$ as a bivariate polynomial 
+of degree $D{-}1$:
 \[
   \phi(x,y) = \sum_{\substack{k,l \ge 0 \\ k+l \le D-1}} a_{kl}\, x^k y^l,
 \]
-with $D(D{+}1)/2$ unknown coefficients. The gradient conditions give a linear system:
-\[
-  M \cdot \mathbf{a} = \mathbf{b},
-\]
-where the matrix entries are
-\[
-  M_{\mathrm{row},\mathrm{col}} = \sum_{i,j} \Bigl[
-    m\cdot k\cdot x_{ij}^{m-1+k-1}\, y_{ij}^{n+l} +
-    n\cdot l\cdot x_{ij}^{m+k}\, y_{ij}^{n-1+l-1}
-  \Bigr],
-\]
-and the right-hand side entries are
-\[
-  b_{\mathrm{row}} = \sum_{i,j} \Bigl[
-    k\cdot \phi_x^{ij}\cdot x_{ij}^{k-1}\, y_{ij}^l +
-    l\cdot \phi_y^{ij}\cdot x_{ij}^k\, y_{ij}^{l-1}
-  \Bigr],
-\]
-using the index mapping $\mathrm{row} = l(2D{-}l{+}1)/2 + k$ and 
-$\mathrm{col} = n(2D{-}n{+}1)/2 + m$. This system is solved via least squares.
+with $D(D{+}1)/2$ unknown coefficients. Setting $\partial g / \partial a_{kl} = 0$ 
+for the least-squares objective gives a linear system $M\mathbf{a} = \mathbf{b}$.
 
-\subsection{Step 4: IFTA Refinement}
+\section{Quality Metrics (Section 5)}
 
-The phase from Step~3 serves as a starting point for the 
-\textbf{Iterative Fourier Transform Algorithm} (Gerchberg--Saxton/Fienup), 
-which alternates between input and output planes:
-\begin{itemize}
-  \item \textbf{Input plane}: replace amplitude with the known $|f_1|$, keep phase.
-  \item \textbf{Output plane}: replace amplitude with desired $|f_2|$ (phase freedom), keep phase.
-\end{itemize}
-The Studienarbeit runs 10 iterations for efficiency, then 20 for SNR.
-
-\subsection{The SepOp Baseline}
-
-The Separabilisierungsoperator maps any 2D signal to a nearby separable signal:
-\[
-  \mathrm{SepOp}\colon f(x,y) \;\mapsto\; 
-  \underbrace{\left(\int f(\xi,y)\,d\xi\right)}_{p(y)} \cdot 
-  \underbrace{\left(\int f(x,\xi)\,d\xi\right)}_{q(x)}.
-\]
-In the discrete case: $q(x) = \sum_y f(x,y)$ and $p(y) = \sum_x f(x,y)$, 
-giving $s(x,y) = q(x)\cdot p(y)$. For separable signals, the 2D problem decomposes 
-into two independent 1D problems with analytical solutions.
-
-\section{Quality Metrics}
-
-\textbf{Signal-to-Noise Ratio} (SNR):
+\textbf{Signal-to-Noise Ratio:}
 \[
   \mathrm{SNR}_I(f_2,f) = \frac{\|f\|^2}{\left\| |f_2| - \alpha|f| \right\|^2},
   \qquad \alpha = \frac{\langle |f|,\, |f_2|\rangle}{\|f\|^2}.
 \]
 
-\textbf{Diffraction Efficiency}:
+\textbf{Diffraction Efficiency:}
 \[
   \eta = \frac{\|f\|^2_{W_{\mathrm{Signal}}}}{\|f_1\|^2_{W_{\mathrm{DE}}}}.
 \]
@@ -180,36 +249,26 @@ into two independent 1D problems with analytical solutions.
 \hline
 \textbf{Input $\to$ Output} & \textbf{Method} & \textbf{SNR (dB)} & $\boldsymbol{\eta}$ \textbf{(\%)} \\ \hline\hline
 Circle $\to$ Marilyn & SepOp  & 19.3 & 78.6 \\
-                     & Kugel  & 16.9 & 75.1 \\
                      & Random & 13.8 & 68.9 \\
                      & \textbf{FEM} & \textbf{20.8} & \textbf{79.0} \\ \hline
 Insep.\ $\to$ Marilyn & SepOp  & 32.8 & 92.1 \\
                        & \textbf{FEM} & \textbf{35.8} & 86.0 \\ \hline
 Gauss $\to$ Marilyn & \textbf{SepOp} & \textbf{31.4} & \textbf{92.5} \\
                     & FEM   & 29.9 & 83.0 \\ \hline
-Quadrat $\to$ Marilyn & SepOp & 20.8 & 79.1 \\
-                      & FEM   & 20.5 & 78.0 \\ \hline
 \end{tabular}
 \end{center}
-
-The FEM method excels for non-separable input signals and performs comparably 
-to SepOp for separable ones.
 
 \section{References}
 
 \begin{enumerate}
-\item H.~Aagedal, M.~Schmid, S.~Egner, J.~M\"uller-Quade, Th.~Beth, F.~Wyrowski,
-  \emph{Analytical beam shaping with application to laser diode arrays}, 
-  JOSA~A, Vol.~14, No.~7, 1997.
-\item T.~Dresel, M.~Beyerlein, J.~Schwider, 
-  \emph{Design of computer-generated beam-shaping holograms by iterative 
-  finite-element mesh adaptation}, Applied Optics~35, 6865--6874, 1996.
-\item R.W.~Gerchberg, W.O.~Saxton, 
-  \emph{A practical algorithm for the determination of phase from image and 
-  diffraction plane pictures}, Optik~35, 237--264, 1972.
-\item F.~Wyrowski, O.~Bryngdahl, 
-  \emph{Iterative Fourier-transform algorithm applied to computer holography}, 
-  JOSA~A, Vol.~5, No.~7, 1988.
+\item H.~Aagedal et al., \emph{Analytical beam shaping with application to laser 
+  diode arrays}, JOSA~A, Vol.~14, No.~7, 1997.
+\item T.~Dresel et al., \emph{Design of computer-generated beam-shaping holograms 
+  by iterative finite-element mesh adaptation}, Applied Optics~35, 6865--6874, 1996.
+\item R.W.~Gerchberg, W.O.~Saxton, \emph{A practical algorithm for the determination 
+  of phase from image and diffraction plane pictures}, Optik~35, 237--264, 1972.
+\item F.~Wyrowski, O.~Bryngdahl, \emph{Iterative Fourier-transform algorithm applied 
+  to computer holography}, JOSA~A, Vol.~5, No.~7, 1988.
 \end{enumerate}
 
 \end{document}

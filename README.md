@@ -70,10 +70,6 @@ python examples/gaussian_to_cross.py
 Each example prints a results table and saves a `.png` figure showing the meshes,
 phase function, output intensities, and IFTA convergence curves.
 
-![Gaussian to Square](docs/gaussian_to_square.png)
-
-![Gaussian to Cross](docs/gaussian_to_cross.png)
-
 ## Project Structure
 
 ```

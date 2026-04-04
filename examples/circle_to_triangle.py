@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Example 4.1: Circle (constant intensity) -> Square (constant intensity)
-using rectangular mesh topology and equal-area optimization.
+Example: Circle (constant intensity) -> Equilateral Triangle (constant intensity)
+using the general energy-weighted rectangular mesh method (Section 4.3).
 
-This is the primary example from Section 4.1 of the Studienarbeit.
-Since both signals have constant intensity, equal area = equal energy.
+The triangular topology from Section 4.2 is the natural choice for this geometry,
+but the general method from Section 4.3 also works — the energy-weighted mesh
+optimization adapts rectangular cells to approximate the triangular region.
 """
 
 import numpy as np
@@ -32,64 +33,69 @@ def make_circle(N, radius=0.15):
     return amp
 
 
-def make_square(N, half_side=0.12):
-    """Square aperture with constant amplitude."""
+def make_equilateral_triangle(N, side=0.3):
+    """Equilateral triangle with constant amplitude, centered at origin."""
     x = np.linspace(-0.5, 0.5, N)
     xx, yy = np.meshgrid(x, x)
+    h = side * np.sqrt(3) / 2
+
+    # Vertices of equilateral triangle centered at origin
+    # V0 = (0, 2h/3), V1 = (-side/2, -h/3), V2 = (side/2, -h/3)
+    y_top = 2 * h / 3
+    y_bot = -h / 3
+
     amp = np.zeros((N, N))
-    amp[(np.abs(xx) <= half_side) & (np.abs(yy) <= half_side)] = 1.0
+    # Point (x,y) is inside if it satisfies all three half-plane conditions
+    inside = (
+        (yy >= y_bot) &                                       # above bottom edge
+        (yy <= y_top - (y_top - y_bot) / (side / 2) * np.abs(xx))  # below the two slanted edges
+    )
+    amp[inside] = 1.0
     return amp
 
 
 def main():
     print("=" * 65)
-    print("  Section 4.1: Circle -> Square (constant intensity)")
-    print("  Rectangular topology, equal-area optimization")
+    print("  Circle -> Triangle (constant intensity)")
+    print("  General energy-weighted method (Section 4.3)")
     print("=" * 65)
 
-    N = 128;  s = 15;  D = 6
+    N = 128;  s = 12;  D = 5;  sig_size = 64
     print(f"\nGrid: {N}x{N}, Mesh: {s}x{s}, Poly degree: {D-1}")
 
-    # --- Output mesh: uniform square grid ---
-    print("\n[1] Output mesh: uniform square grid...")
+    # Signals (low-res for mesh, high-res for propagation)
+    input_amp = make_circle(N)
+    input_lo = make_circle(sig_size)
+    desired_amp = make_equilateral_triangle(N)
+    desired_lo = make_equilateral_triangle(sig_size)
+    signal_window = desired_amp > 0.5
+
+    # --- Meshes ---
+    print("\n[1] Input mesh (energy-weighted for circle)...")
+    mesh_in = RectMesh(s)
+    mesh_in.init_uniform_square()
+    mesh_in.optimize_equal_energy(input_lo, n_iter=400, alpha=0.3)
+    e_in = mesh_in.cell_energies(input_lo)
+    print(f"    sigma/mu = {np.std(e_in)/np.mean(e_in):.4f}")
+
+    print("[1] Output mesh (energy-weighted for triangle)...")
     mesh_out = RectMesh(s)
     mesh_out.init_uniform_square()
-    # Scale to [-0.25, 0.25] centered at 0.5
-    mesh_out.x = mesh_out.x * 0.5 + 0.25
-    mesh_out.y = mesh_out.y * 0.5 + 0.25
-
-    # --- Input mesh: circle boundary, 4-point interpolation, equal-area ---
-    print("[1] Input mesh: circle boundary + 4-point interpolation...")
-    mesh_in = RectMesh(s)
-    mesh_in.init_uniform_circle(radius=0.25, cx=0.5, cy=0.5)
-
-    print("    Laplace smoothing (30 iterations)...")
-    mesh_in.laplace_smooth(n_iter=30, alpha=0.5)
-
-    print("    Equal-area optimization (8-point algorithm, 500 iterations)...")
-    mesh_in.optimize_equal_area(
-        n_iter=500, alpha=0.4, move_boundary=False
-    )
-
-    areas = mesh_in.cell_areas()
-    print(f"    Cell areas: sigma/mu = {np.std(areas)/np.mean(areas):.4f}")
+    mesh_out.optimize_equal_energy(desired_lo, n_iter=400, alpha=0.3)
+    e_out = mesh_out.cell_energies(desired_lo)
+    print(f"    sigma/mu = {np.std(e_out)/np.mean(e_out):.4f}")
 
     # --- Phase recovery ---
-    print(f"\n[2] Phase recovery (degree {D-1} polynomial, grid_size={N})...")
+    print(f"\n[2] Phase recovery (degree {D-1} polynomial)...")
     coeffs = recover_phase_polynomial(
         mesh_in.x, mesh_in.y, mesh_out.x, mesh_out.y, D, grid_size=N
     )
-
     t = np.linspace(0, 1, N)
     xx, yy = np.meshgrid(t, t)
     phase_fem = evaluate_phase(coeffs, D, xx, yy)
 
     # --- Evaluate ---
     print("\n[3] Evaluating DPE...")
-    input_amp = make_circle(N, radius=0.15)
-    desired_amp = make_square(N, half_side=0.12)
-    signal_window = desired_amp > 0.5
-
     field_in = make_input_field(input_amp)
     output_fem = propagate(apply_dpe(field_in, phase_fem))
     snr_fem = compute_snr(desired_amp, output_fem, signal_window)
@@ -97,7 +103,7 @@ def main():
     print(f"    FEM:  SNR = {snr_fem:.2f} dB, eta = {eff_fem*100:.1f}%")
 
     # --- IFTA ---
-    print("\n[4] IFTA refinement (10 + 20 iterations)...")
+    print("\n[4] IFTA refinement...")
     phase_opt, hist_fem = ifta(input_amp, desired_amp, phase_fem,
                                n_iter_efficiency=10, n_iter_snr=20,
                                signal_window=signal_window, verbose=True)
@@ -117,7 +123,7 @@ def main():
 
     # Results
     print("\n" + "=" * 55)
-    print("  Results: Circle -> Square (constant intensity)")
+    print("  Results: Circle -> Triangle (constant intensity)")
     print("=" * 55)
     print(f"  {'Method':<22} {'SNR (dB)':>10} {'eta (%)':>10}")
     print(f"  {'-'*22} {'-'*10} {'-'*10}")
@@ -128,16 +134,16 @@ def main():
 
     # --- Figure ---
     print("\nGenerating figure...")
-    fig, axes = plt.subplots(3, 4, figsize=(18, 13))
-    fig.suptitle('Section 4.1: Circle → Square (Constant Intensity, Rectangular Topology)',
+    fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+    fig.suptitle('Circle → Triangle (Constant Intensity, Energy-Weighted Method §4.3)',
                  fontsize=13, fontweight='bold')
 
     axes[0,0].imshow(input_amp, cmap='gray', origin='lower')
     axes[0,0].set_title('Input: Circle (const)')
     axes[0,1].imshow(desired_amp, cmap='gray', origin='lower')
-    axes[0,1].set_title('Desired: Square (const)')
-    plot_mesh(mesh_in, ax=axes[0,2], title=f'Input mesh on circle (s={s})')
-    plot_mesh(mesh_out, ax=axes[0,3], title='Output mesh (uniform square)', color='firebrick')
+    axes[0,1].set_title('Desired: Triangle (const)')
+    plot_mesh(mesh_in, ax=axes[0,2], title=f'Input mesh (s={s})')
+    plot_mesh(mesh_out, ax=axes[0,3], title='Output mesh', color='firebrick')
 
     im = axes[1,0].imshow(np.mod(phase_fem, 2*np.pi), cmap='twilight', origin='lower')
     axes[1,0].set_title('FEM phase mod 2π')
@@ -149,35 +155,9 @@ def main():
     axes[1,3].imshow(np.abs(output_rand)**2, cmap='inferno', origin='lower')
     axes[1,3].set_title(f'Random+IFTA\nSNR={snr_rand:.1f} dB')
 
-    iters_f = [h['iteration'] for h in hist_fem]
-    snrs_f = [h['snr_db'] for h in hist_fem]
-    iters_r = [h['iteration'] for h in hist_rand]
-    snrs_r = [h['snr_db'] for h in hist_rand]
-    axes[2,0].plot(iters_f, snrs_f, 'b-o', ms=3, label='FEM start')
-    axes[2,0].plot(iters_r, snrs_r, 'r-s', ms=3, label='Random start')
-    axes[2,0].set_xlabel('Iteration'); axes[2,0].set_ylabel('SNR (dB)')
-    axes[2,0].set_title('IFTA convergence'); axes[2,0].legend(fontsize=9)
-    axes[2,0].grid(True, alpha=0.3)
-
-    effs_f = [h['efficiency']*100 for h in hist_fem]
-    effs_r = [h['efficiency']*100 for h in hist_rand]
-    axes[2,1].plot(iters_f, effs_f, 'b-o', ms=3, label='FEM start')
-    axes[2,1].plot(iters_r, effs_r, 'r-s', ms=3, label='Random start')
-    axes[2,1].set_xlabel('Iteration'); axes[2,1].set_ylabel('η (%)')
-    axes[2,1].set_title('Diffraction efficiency'); axes[2,1].legend(fontsize=9)
-    axes[2,1].grid(True, alpha=0.3)
-
-    mid = N // 2
-    axes[2,2].plot(np.abs(desired_amp[mid,:])**2, 'k-', lw=2, label='Desired')
-    axes[2,2].plot(np.abs(output_opt[mid,:])**2, 'b--', label='FEM+IFTA')
-    axes[2,2].plot(np.abs(output_rand[mid,:])**2, 'r:', label='Rand+IFTA')
-    axes[2,2].set_title('Cross-section (y=0)'); axes[2,2].legend(fontsize=9)
-
-    plot_area_histogram(mesh_in, ax=axes[2,3], title='Input mesh cell areas')
-
     plt.tight_layout()
-    fig.savefig('circle_to_square.png', dpi=150, bbox_inches='tight')
-    print("  Saved circle_to_square.png")
+    fig.savefig('circle_to_triangle.png', dpi=150, bbox_inches='tight')
+    print("  Saved circle_to_triangle.png")
     print("\nDone!")
 
 
