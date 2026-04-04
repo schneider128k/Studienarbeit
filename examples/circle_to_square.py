@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Example 4.1: Circle (constant intensity) -> Square (constant intensity)
-using rectangular mesh topology and equal-area optimization.
+Section 4.1: Circle (constant intensity) -> Square (constant intensity)
+using rectangular mesh topology.
 
-This is the primary example from Section 4.1 of the Studienarbeit.
-Since both signals have constant intensity, equal area = equal energy.
+Boundary nodes placed ON the circle/square shapes.
+All mesh cells are INSIDE the shapes — no cells over the black region.
+4-point interpolation for interior nodes.
 """
 
 import numpy as np
@@ -12,7 +13,6 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import sys, os
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from diffractive_fem.mesh import RectMesh
@@ -20,166 +20,109 @@ from diffractive_fem.phase import recover_phase_polynomial, evaluate_phase
 from diffractive_fem.propagation import propagate, apply_dpe, make_input_field
 from diffractive_fem.metrics import compute_snr, compute_efficiency
 from diffractive_fem.ifta import ifta
-from diffractive_fem.visualization import plot_mesh, plot_area_histogram
+from diffractive_fem.visualization import plot_mesh
 
 
-def make_circle(N, radius=0.15):
-    """Circular aperture with constant amplitude."""
+def make_circle(N, r=0.15):
     x = np.linspace(-0.5, 0.5, N)
     xx, yy = np.meshgrid(x, x)
-    amp = np.zeros((N, N))
-    amp[xx**2 + yy**2 <= radius**2] = 1.0
+    amp = np.zeros((N, N)); amp[xx**2 + yy**2 <= r**2] = 1.0
     return amp
 
-
-def make_square(N, half_side=0.12):
-    """Square aperture with constant amplitude."""
+def make_square(N, h=0.12):
     x = np.linspace(-0.5, 0.5, N)
     xx, yy = np.meshgrid(x, x)
-    amp = np.zeros((N, N))
-    amp[(np.abs(xx) <= half_side) & (np.abs(yy) <= half_side)] = 1.0
+    amp = np.zeros((N, N)); amp[(np.abs(xx) <= h) & (np.abs(yy) <= h)] = 1.0
     return amp
 
 
 def main():
     print("=" * 65)
     print("  Section 4.1: Circle -> Square (constant intensity)")
-    print("  Rectangular topology, equal-area optimization")
+    print("  Rectangular topology, boundary ON the shapes")
     print("=" * 65)
 
-    N = 128;  s = 15;  D = 6
-    print(f"\nGrid: {N}x{N}, Mesh: {s}x{s}, Poly degree: {D-1}")
+    N = 128; s = 15; D = 6
 
-    # --- Output mesh: uniform square grid ---
-    print("\n[1] Output mesh: uniform square grid...")
+    # Input mesh: boundary on circle, 4-point interpolation
+    print(f"\n[1] Input mesh (s={s}): boundary on circle, 4-pt interpolation...")
+    mesh_in = RectMesh(s)
+    mesh_in.init_uniform_circle(radius=0.25, cx=0.5, cy=0.5)
+    areas = mesh_in.cell_areas()
+    print(f"    Cell area sigma/mu = {np.std(areas)/np.mean(areas):.4f}")
+
+    # Output mesh: uniform grid on square
+    print("[1] Output mesh: uniform grid on square...")
     mesh_out = RectMesh(s)
     mesh_out.init_uniform_square()
-    # Scale to [-0.25, 0.25] centered at 0.5
     mesh_out.x = mesh_out.x * 0.5 + 0.25
     mesh_out.y = mesh_out.y * 0.5 + 0.25
 
-    # --- Input mesh: circle boundary, 4-point interpolation, equal-area ---
-    print("[1] Input mesh: circle boundary + 4-point interpolation...")
-    mesh_in = RectMesh(s)
-    mesh_in.init_uniform_circle(radius=0.25, cx=0.5, cy=0.5)
-
-    print("    Laplace smoothing (30 iterations)...")
-    mesh_in.laplace_smooth(n_iter=30, alpha=0.5)
-
-    print("    Equal-area optimization (8-point algorithm, 500 iterations)...")
-    mesh_in.optimize_equal_area(
-        n_iter=500, alpha=0.4, move_boundary=False
-    )
-
-    areas = mesh_in.cell_areas()
-    print(f"    Cell areas: sigma/mu = {np.std(areas)/np.mean(areas):.4f}")
-
-    # --- Phase recovery ---
-    print(f"\n[2] Phase recovery (degree {D-1} polynomial, grid_size={N})...")
+    # Phase recovery
+    print(f"\n[2] Phase recovery (degree {D-1}, grid_size={N})...")
     coeffs = recover_phase_polynomial(
         mesh_in.x, mesh_in.y, mesh_out.x, mesh_out.y, D, grid_size=N
     )
-
-    t = np.linspace(0, 1, N)
-    xx, yy = np.meshgrid(t, t)
+    t = np.linspace(0, 1, N); xx, yy = np.meshgrid(t, t)
     phase_fem = evaluate_phase(coeffs, D, xx, yy)
 
-    # --- Evaluate ---
-    print("\n[3] Evaluating DPE...")
-    input_amp = make_circle(N, radius=0.15)
-    desired_amp = make_square(N, half_side=0.12)
+    # Evaluate
+    input_amp = make_circle(N); desired_amp = make_square(N)
     signal_window = desired_amp > 0.5
-
     field_in = make_input_field(input_amp)
     output_fem = propagate(apply_dpe(field_in, phase_fem))
     snr_fem = compute_snr(desired_amp, output_fem, signal_window)
     eff_fem = compute_efficiency(field_in, output_fem, signal_window)
-    print(f"    FEM:  SNR = {snr_fem:.2f} dB, eta = {eff_fem*100:.1f}%")
+    print(f"\n[3] FEM:  SNR = {snr_fem:.2f} dB, eta = {eff_fem*100:.1f}%")
 
-    # --- IFTA ---
-    print("\n[4] IFTA refinement (10 + 20 iterations)...")
-    phase_opt, hist_fem = ifta(input_amp, desired_amp, phase_fem,
-                               n_iter_efficiency=10, n_iter_snr=20,
-                               signal_window=signal_window, verbose=True)
+    # IFTA
+    print("\n[4] IFTA refinement...")
+    phase_opt, hist_f = ifta(input_amp, desired_amp, phase_fem,
+        n_iter_efficiency=10, n_iter_snr=20, signal_window=signal_window, verbose=True)
     output_opt = propagate(apply_dpe(field_in, phase_opt))
     snr_opt = compute_snr(desired_amp, output_opt, signal_window)
     eff_opt = compute_efficiency(field_in, output_opt, signal_window)
 
-    # --- Random baseline ---
-    print("\n[5] Baseline: random phase + IFTA...")
-    phase_rand = np.random.uniform(0, 2*np.pi, (N, N))
-    phase_rand_opt, hist_rand = ifta(input_amp, desired_amp, phase_rand,
-                                     n_iter_efficiency=10, n_iter_snr=20,
-                                     signal_window=signal_window, verbose=False)
-    output_rand = propagate(apply_dpe(field_in, phase_rand_opt))
-    snr_rand = compute_snr(desired_amp, output_rand, signal_window)
-    eff_rand = compute_efficiency(field_in, output_rand, signal_window)
+    # Random baseline
+    print("\n[5] Baseline: random + IFTA...")
+    phase_r = np.random.uniform(0, 2*np.pi, (N, N))
+    phase_r_opt, hist_r = ifta(input_amp, desired_amp, phase_r,
+        n_iter_efficiency=10, n_iter_snr=20, signal_window=signal_window, verbose=False)
+    output_r = propagate(apply_dpe(field_in, phase_r_opt))
+    snr_r = compute_snr(desired_amp, output_r, signal_window)
+    eff_r = compute_efficiency(field_in, output_r, signal_window)
 
-    # Results
     print("\n" + "=" * 55)
-    print("  Results: Circle -> Square (constant intensity)")
-    print("=" * 55)
     print(f"  {'Method':<22} {'SNR (dB)':>10} {'eta (%)':>10}")
     print(f"  {'-'*22} {'-'*10} {'-'*10}")
     print(f"  {'FEM (no IFTA)':<22} {snr_fem:>10.2f} {eff_fem*100:>10.1f}")
     print(f"  {'FEM + IFTA':<22} {snr_opt:>10.2f} {eff_opt*100:>10.1f}")
-    print(f"  {'Random + IFTA':<22} {snr_rand:>10.2f} {eff_rand*100:>10.1f}")
+    print(f"  {'Random + IFTA':<22} {snr_r:>10.2f} {eff_r*100:>10.1f}")
     print("=" * 55)
 
-    # --- Figure ---
-    print("\nGenerating figure...")
-    fig, axes = plt.subplots(3, 4, figsize=(18, 13))
-    fig.suptitle('Section 4.1: Circle → Square (Constant Intensity, Rectangular Topology)',
+    # Figure
+    fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+    fig.suptitle('§4.1: Circle → Square (Constant Intensity, Rectangular Topology)',
                  fontsize=13, fontweight='bold')
-
     axes[0,0].imshow(input_amp, cmap='gray', origin='lower')
-    axes[0,0].set_title('Input: Circle (const)')
+    axes[0,0].set_title('Input: Circle')
     axes[0,1].imshow(desired_amp, cmap='gray', origin='lower')
-    axes[0,1].set_title('Desired: Square (const)')
-    plot_mesh(mesh_in, ax=axes[0,2], title=f'Input mesh on circle (s={s})')
-    plot_mesh(mesh_out, ax=axes[0,3], title='Output mesh (uniform square)', color='firebrick')
+    axes[0,1].set_title('Desired: Square')
+    plot_mesh(mesh_in, ax=axes[0,2], title=f'Input mesh (s={s})')
+    plot_mesh(mesh_out, ax=axes[0,3], title='Output mesh', color='firebrick')
 
     im = axes[1,0].imshow(np.mod(phase_fem, 2*np.pi), cmap='twilight', origin='lower')
-    axes[1,0].set_title('FEM phase mod 2π')
-    plt.colorbar(im, ax=axes[1,0], shrink=0.8)
+    axes[1,0].set_title('FEM phase mod 2π'); plt.colorbar(im, ax=axes[1,0], shrink=0.8)
     axes[1,1].imshow(np.abs(output_fem)**2, cmap='inferno', origin='lower')
     axes[1,1].set_title(f'FEM output\nSNR={snr_fem:.1f} dB')
     axes[1,2].imshow(np.abs(output_opt)**2, cmap='inferno', origin='lower')
     axes[1,2].set_title(f'FEM+IFTA\nSNR={snr_opt:.1f} dB')
-    axes[1,3].imshow(np.abs(output_rand)**2, cmap='inferno', origin='lower')
-    axes[1,3].set_title(f'Random+IFTA\nSNR={snr_rand:.1f} dB')
-
-    iters_f = [h['iteration'] for h in hist_fem]
-    snrs_f = [h['snr_db'] for h in hist_fem]
-    iters_r = [h['iteration'] for h in hist_rand]
-    snrs_r = [h['snr_db'] for h in hist_rand]
-    axes[2,0].plot(iters_f, snrs_f, 'b-o', ms=3, label='FEM start')
-    axes[2,0].plot(iters_r, snrs_r, 'r-s', ms=3, label='Random start')
-    axes[2,0].set_xlabel('Iteration'); axes[2,0].set_ylabel('SNR (dB)')
-    axes[2,0].set_title('IFTA convergence'); axes[2,0].legend(fontsize=9)
-    axes[2,0].grid(True, alpha=0.3)
-
-    effs_f = [h['efficiency']*100 for h in hist_fem]
-    effs_r = [h['efficiency']*100 for h in hist_rand]
-    axes[2,1].plot(iters_f, effs_f, 'b-o', ms=3, label='FEM start')
-    axes[2,1].plot(iters_r, effs_r, 'r-s', ms=3, label='Random start')
-    axes[2,1].set_xlabel('Iteration'); axes[2,1].set_ylabel('η (%)')
-    axes[2,1].set_title('Diffraction efficiency'); axes[2,1].legend(fontsize=9)
-    axes[2,1].grid(True, alpha=0.3)
-
-    mid = N // 2
-    axes[2,2].plot(np.abs(desired_amp[mid,:])**2, 'k-', lw=2, label='Desired')
-    axes[2,2].plot(np.abs(output_opt[mid,:])**2, 'b--', label='FEM+IFTA')
-    axes[2,2].plot(np.abs(output_rand[mid,:])**2, 'r:', label='Rand+IFTA')
-    axes[2,2].set_title('Cross-section (y=0)'); axes[2,2].legend(fontsize=9)
-
-    plot_area_histogram(mesh_in, ax=axes[2,3], title='Input mesh cell areas')
+    axes[1,3].imshow(np.abs(output_r)**2, cmap='inferno', origin='lower')
+    axes[1,3].set_title(f'Random+IFTA\nSNR={snr_r:.1f} dB')
 
     plt.tight_layout()
     fig.savefig('circle_to_square.png', dpi=150, bbox_inches='tight')
-    print("  Saved circle_to_square.png")
-    print("\nDone!")
-
+    print("\n  Saved circle_to_square.png\nDone!")
 
 if __name__ == '__main__':
     main()

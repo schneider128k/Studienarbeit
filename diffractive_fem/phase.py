@@ -209,3 +209,95 @@ def _safe_pow(x, n):
     if n == 0:
         return np.ones_like(x)
     return np.power(x, n)
+
+
+def recover_phase_from_points(
+    in_x: np.ndarray, in_y: np.ndarray,
+    out_x: np.ndarray, out_y: np.ndarray,
+    D: int,
+    grid_size: int = None
+) -> np.ndarray:
+    """
+    Recover phase polynomial from flat arrays of node positions.
+
+    This is a variant of recover_phase_polynomial that accepts 1D arrays
+    of arbitrary node positions (e.g., from a triangular mesh).
+
+    Parameters
+    ----------
+    in_x, in_y : ndarray, shape (n_nodes,)
+        Input mesh node coordinates.
+    out_x, out_y : ndarray, shape (n_nodes,)
+        Output mesh node coordinates.
+    D : int
+        Polynomial degree parameter.
+    grid_size : int, optional
+        FFT grid size for proper phase scaling.
+
+    Returns
+    -------
+    coeffs : ndarray
+        Polynomial coefficients.
+    """
+    n_nodes = len(in_x)
+    n_coeffs = D * (D + 1) // 2
+
+    # Center and scale output coordinates
+    if grid_size is not None:
+        c = 2 * np.pi * grid_size
+        tx = c * (out_x - 0.5)
+        ty = c * (out_y - 0.5)
+    else:
+        tx = out_x.copy()
+        ty = out_y.copy()
+
+    M = np.zeros((n_coeffs, n_coeffs))
+    b = np.zeros(n_coeffs)
+
+    for row_l in range(D):
+        for row_k in range(D - row_l):
+            row = _coeff_index(row_k, row_l, D)
+
+            rhs = 0.0
+            for n in range(n_nodes):
+                xn, yn = in_x[n], in_y[n]
+                if row_k > 0:
+                    rhs += row_k * tx[n] * _safe_pow_scalar(xn, row_k - 1) * _safe_pow_scalar(yn, row_l)
+                if row_l > 0:
+                    rhs += row_l * ty[n] * _safe_pow_scalar(xn, row_k) * _safe_pow_scalar(yn, row_l - 1)
+            b[row] = rhs
+
+            for col_n in range(D):
+                for col_m in range(D - col_n):
+                    col = _coeff_index(col_m, col_n, D)
+                    val = 0.0
+                    for n in range(n_nodes):
+                        xn, yn = in_x[n], in_y[n]
+                        if col_m > 0 and row_k > 0:
+                            val += (col_m * row_k *
+                                    _safe_pow_scalar(xn, col_m - 1 + row_k - 1) *
+                                    _safe_pow_scalar(yn, col_n + row_l))
+                        if col_n > 0 and row_l > 0:
+                            val += (col_n * row_l *
+                                    _safe_pow_scalar(xn, col_m + row_k) *
+                                    _safe_pow_scalar(yn, col_n - 1 + row_l - 1))
+                    M[row, col] = val
+
+    reg = 1e-10 * np.trace(M) / n_coeffs if np.isfinite(np.trace(M)) else 1e-10
+    M += reg * np.eye(n_coeffs)
+    M = np.nan_to_num(M, nan=0.0, posinf=0.0, neginf=0.0)
+    b = np.nan_to_num(b, nan=0.0, posinf=0.0, neginf=0.0)
+
+    try:
+        coeffs = np.linalg.lstsq(M, b, rcond=None)[0]
+    except np.linalg.LinAlgError:
+        coeffs = np.linalg.solve(M + 1e-6 * np.eye(n_coeffs), b)
+
+    return coeffs
+
+
+def _safe_pow_scalar(x, n):
+    """Scalar version of safe_pow."""
+    if n == 0:
+        return 1.0
+    return x ** n
