@@ -90,7 +90,7 @@ phase function, output intensities, and IFTA convergence curves.
 diffractive_fem/
 ├── README.md
 ├── requirements.txt
-├── LICENSE_CODE                    ← GNU GPL v3 (Python code)
+├── LICENSE_CODE                    ← MIT (Python code)
 ├── LICENSE_STUDIENARBEIT           ← CC BY 4.0 (Studienarbeit)
 │
 ├── diffractive_fem/                ← Python package
@@ -184,7 +184,7 @@ pdflatex ausarb.tex && pdflatex ausarb.tex
 ## License
 
 - **Python code**:
-  [GNU General Public License v3.0](LICENSE_CODE)
+  [MIT License](LICENSE_CODE)
 - **Studienarbeit**:
   [Creative Commons Attribution 4.0 International](LICENSE_STUDIENARBEIT)
 
